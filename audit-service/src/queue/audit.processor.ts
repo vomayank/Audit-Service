@@ -65,6 +65,11 @@ export class AuditProcessor {
 
   private async processAuditLog(data: any): Promise<AuditLogDocument> {
     try {
+      // Ensure tenant_id is present for multi-tenancy
+      if (!data.tenant_id) {
+        this.logger.warn('Processing log without tenant_id', { event_id: data.event_id });
+      }
+      
       const auditLog = new this.auditLogModel(data);
       return await auditLog.save();
     } catch (error) {
@@ -75,6 +80,11 @@ export class AuditProcessor {
 
   private async processTransactionLog(data: any): Promise<TransactionLogDocument> {
     try {
+      // Ensure tenant_id is present for multi-tenancy
+      if (!data.tenant_id) {
+        this.logger.warn('Processing transaction log without tenant_id', { transaction_id: data.transaction_id });
+      }
+      
       // Ensure date fields are properly formatted
       if (data.timestamp_start) {
         data.timestamp_start = new Date(data.timestamp_start);

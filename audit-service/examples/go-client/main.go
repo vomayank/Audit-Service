@@ -62,14 +62,18 @@ type TransactionLogRequest struct {
 
 // AuditClient represents the audit service client
 type AuditClient struct {
-	BaseURL string
-	Client  *http.Client
+	BaseURL  string
+	Client   *http.Client
+	UserID   string // User ID from RBAC service
+	TenantID string // Tenant ID from RBAC service
 }
 
 // NewAuditClient creates a new audit service client
-func NewAuditClient(baseURL string) *AuditClient {
+func NewAuditClient(baseURL, userID, tenantID string) *AuditClient {
 	return &AuditClient{
-		BaseURL: baseURL,
+		BaseURL:  baseURL,
+		UserID:   userID,
+		TenantID: tenantID,
 		Client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -99,7 +103,10 @@ func (c *AuditClient) SendAuditLog(log AuditLogRequest) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Add headers including RBAC context
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", c.UserID)
+	req.Header.Set("X-Tenant-Id", c.TenantID)
 	req.Header.Set("X-Correlation-Id", log.CorrelationID)
 
 	resp, err := c.Client.Do(req)
@@ -144,7 +151,10 @@ func (c *AuditClient) SendTransactionLog(log TransactionLogRequest) error {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Add headers including RBAC context
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-Id", c.UserID)
+	req.Header.Set("X-Tenant-Id", c.TenantID)
 	req.Header.Set("X-Correlation-Id", log.CorrelationID)
 
 	resp, err := c.Client.Do(req)
@@ -166,12 +176,16 @@ func (c *AuditClient) SendTransactionLog(log TransactionLogRequest) error {
 	return nil
 }
 
-// SearchLogs searches for logs
+// SearchLogs searches for logs (automatically filtered by tenant)
 func (c *AuditClient) SearchLogs(params map[string]string) ([]byte, error) {
 	req, err := http.NewRequest("GET", c.BaseURL+"/api/v1/logs", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
+	// Add RBAC headers for tenant isolation
+	req.Header.Set("X-User-Id", c.UserID)
+	req.Header.Set("X-Tenant-Id", c.TenantID)
 
 	q := req.URL.Query()
 	for key, value := range params {
@@ -198,8 +212,13 @@ func (c *AuditClient) SearchLogs(params map[string]string) ([]byte, error) {
 }
 
 func main() {
-	// Create audit client
-	client := NewAuditClient("http://localhost:3000")
+	// Create audit client with RBAC context
+	// In a real application, these would come from the RBAC service
+	userID := "user_golang_123"
+	tenantID := "tenant_001"
+	client := NewAuditClient("http://localhost:3000", userID, tenantID)
+
+	fmt.Printf("Audit Client initialized for User: %s, Tenant: %s\n\n", userID, tenantID)
 
 	// Example 1: Send an audit log for user login
 	auditLog := AuditLogRequest{
@@ -207,7 +226,7 @@ func main() {
 		SourceService: "auth-service-go",
 		Status:        LogStatusSuccess,
 		Action:        "user_login",
-		ActorID:       "user123",
+		// ActorID will be automatically set from X-User-Id header
 		IPAddress:     "192.168.1.100",
 		UserAgent:     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 		Payload: map[string]interface{}{
@@ -248,9 +267,10 @@ func main() {
 		fmt.Printf("Error sending transaction log: %v\n", err)
 	}
 
-	// Example 3: Search for logs
+	// Example 3: Search for logs (automatically filtered by tenant)
 	time.Sleep(2 * time.Second) // Wait for logs to be processed
 
+	fmt.Printf("\nSearching logs for tenant: %s\n", tenantID)
 	searchParams := map[string]string{
 		"source_service": "auth-service-go",
 		"status":         "success",
@@ -262,5 +282,21 @@ func main() {
 		fmt.Printf("Error searching logs: %v\n", err)
 	} else {
 		fmt.Printf("Search results: %s\n", string(results))
+	}
+
+	// Example 4: Demonstrate tenant isolation
+	fmt.Printf("\n--- Demonstrating Tenant Isolation ---\n")
+	
+	// Create a client for a different tenant
+	otherTenantClient := NewAuditClient("http://localhost:3000", "user_other", "tenant_002")
+	
+	// This client will only see logs for tenant_002
+	otherResults, err := otherTenantClient.SearchLogs(map[string]string{
+		"limit": "10",
+	})
+	if err != nil {
+		fmt.Printf("Error searching other tenant logs: %v\n", err)
+	} else {
+		fmt.Printf("Other tenant results (should be empty or only tenant_002 logs): %s\n", string(otherResults))
 	}
 }

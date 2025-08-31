@@ -12,6 +12,9 @@ export class TransactionLog {
   transaction_id: string;
 
   @Prop({ index: true })
+  tenant_id: string;
+
+  @Prop({ index: true })
   correlation_id: string;
 
   @Prop({ required: true, index: true })
@@ -52,7 +55,8 @@ export class TransactionLog {
 export const TransactionLogSchema = SchemaFactory.createForClass(TransactionLog);
 
 // Create compound indexes for performance queries
-TransactionLogSchema.index({ timestamp_start: -1, source_service: 1, status: 1 });
+TransactionLogSchema.index({ tenant_id: 1, timestamp_start: -1 });
+TransactionLogSchema.index({ tenant_id: 1, source_service: 1, status: 1, timestamp_start: -1 });
 TransactionLogSchema.index({ transaction_id: 1 });
 TransactionLogSchema.index({ correlation_id: 1 });
-TransactionLogSchema.index({ source_service: 1, status: 1, timestamp_start: -1 });
+TransactionLogSchema.index({ tenant_id: 1, status: 1, timestamp_start: -1 });

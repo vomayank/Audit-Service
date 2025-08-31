@@ -18,6 +18,9 @@ export class AuditLog {
   source_service: string;
 
   @Prop({ index: true })
+  tenant_id: string;
+
+  @Prop({ index: true })
   actor_id: string;
 
   @Prop({ index: true })
@@ -45,7 +48,8 @@ export class AuditLog {
 export const AuditLogSchema = SchemaFactory.createForClass(AuditLog);
 
 // Create compound indexes for optimal query performance
-AuditLogSchema.index({ timestamp: -1, actor_id: 1 });
+AuditLogSchema.index({ tenant_id: 1, timestamp: -1 });
+AuditLogSchema.index({ tenant_id: 1, actor_id: 1, timestamp: -1 });
 AuditLogSchema.index({ correlation_id: 1 });
-AuditLogSchema.index({ source_service: 1, timestamp: -1 });
+AuditLogSchema.index({ tenant_id: 1, source_service: 1, timestamp: -1 });
 AuditLogSchema.index({ 'payload.ip_address': 1 }, { sparse: true });

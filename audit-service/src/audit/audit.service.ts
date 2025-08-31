@@ -22,7 +22,7 @@ export class AuditService {
   ) {}
 
   // Ingestion methods - async via queue
-  async ingestLog(logData: CreateAuditLogDto | CreateTransactionLogDto): Promise<{ success: boolean; message: string; data: { job_id: string } }> {
+  async ingestLog(logData: any): Promise<{ success: boolean; message: string; data: { job_id: string } }> {
     try {
       // Add correlation ID if not provided
       if (!logData.correlation_id) {
@@ -53,12 +53,15 @@ export class AuditService {
   }
 
   // Search methods - direct database queries
-  async searchLogs(searchDto: SearchLogsDto): Promise<any> {
+  async searchLogs(searchDto: any): Promise<any> {
     try {
-      const { page, limit, sort_by, sort_order, type, ...filters } = searchDto;
+      const { page = 1, limit = 20, sort_by = 'timestamp', sort_order = 'desc', type, tenant_id, ...filters } = searchDto;
       
-      // Build query
+      // Build query with tenant isolation
       const query: any = {};
+      
+      // Always filter by tenant_id for multi-tenancy
+      if (tenant_id) query.tenant_id = tenant_id;
       
       if (filters.actor_id) query.actor_id = filters.actor_id;
       if (filters.source_service) query.source_service = filters.source_service;
@@ -119,9 +122,9 @@ export class AuditService {
     }
   }
 
-  async advancedSearch(searchDto: AdvancedSearchDto): Promise<any> {
+  async advancedSearch(searchDto: any): Promise<any> {
     try {
-      const { filters, projection, aggregation, page, limit, sort } = searchDto;
+      const { filters, projection, aggregation, page = 1, limit = 20, sort } = searchDto;
       
       // Build MongoDB query from filters
       const query: any = {};
@@ -229,17 +232,23 @@ export class AuditService {
     }
   }
 
-  async getLogById(id: string, type?: LogType): Promise<any> {
+  async getLogById(id: string, type?: LogType, tenantId?: string): Promise<any> {
     try {
       let log;
       
+      // Build query with tenant isolation
+      const query: any = { _id: id };
+      if (tenantId) {
+        query.tenant_id = tenantId;
+      }
+
       if (type === LogType.TRANSACTION) {
-        log = await this.transactionLogModel.findById(id).lean().exec();
+        log = await this.transactionLogModel.findOne(query).lean().exec();
       } else {
-        log = await this.auditLogModel.findById(id).lean().exec();
+        log = await this.auditLogModel.findOne(query).lean().exec();
         if (!log && !type) {
           // If not found in audit logs and no type specified, try transaction logs
-          log = await this.transactionLogModel.findById(id).lean().exec();
+          log = await this.transactionLogModel.findOne(query).lean().exec();
         }
       }
 
@@ -261,11 +270,17 @@ export class AuditService {
     }
   }
 
-  async getLogsByCorrelationId(correlationId: string): Promise<any> {
+  async getLogsByCorrelationId(correlationId: string, tenantId?: string): Promise<any> {
     try {
+      // Build query with tenant isolation
+      const query: any = { correlation_id: correlationId };
+      if (tenantId) {
+        query.tenant_id = tenantId;
+      }
+
       const [auditLogs, transactionLogs] = await Promise.all([
-        this.auditLogModel.find({ correlation_id: correlationId }).lean().exec(),
-        this.transactionLogModel.find({ correlation_id: correlationId }).lean().exec(),
+        this.auditLogModel.find(query).lean().exec(),
+        this.transactionLogModel.find(query).lean().exec(),
       ]);
 
       const allLogs = [

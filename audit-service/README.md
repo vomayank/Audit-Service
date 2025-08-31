@@ -11,6 +11,8 @@ The Audit Service implements an **Event-Driven Architecture (EDA)** with the fol
 - **Worker/Processor**: Background job processor for data persistence
 - **NoSQL Database**: MongoDB for flexible, schema-less storage
 - **Global Exception Filter**: Centralized error handling
+- **RBAC Integration**: Automatic tenant isolation via headers from RBAC service
+- **Multi-tenancy Support**: Built-in tenant isolation for all operations
 
 ### Data Flow
 
@@ -60,6 +62,13 @@ Once the service is running, access the interactive Swagger documentation at:
 - **Swagger UI**: http://localhost:3000/api/docs
 - **OpenAPI JSON**: http://localhost:3000/api-json
 
+### Required Headers (from RBAC Service)
+
+All API calls should include these headers, which are automatically set by the RBAC service:
+- `X-User-Id`: The authenticated user's ID
+- `X-Tenant-Id`: The tenant/organization ID for multi-tenancy
+- `X-Correlation-Id`: (Optional) Request correlation ID for tracing
+
 ### Core Endpoints
 
 #### 1. Ingest Log Event
@@ -68,21 +77,25 @@ POST /api/v1/logs
 ```
 
 **Audit Log Example:**
-```json
-{
-  "type": "audit",
-  "event_id": "evt_001",
-  "source_service": "auth-service",
-  "status": "success",
-  "action": "user_login",
-  "actor_id": "user_123",
-  "ip_address": "192.168.1.100",
-  "payload": {
-    "username": "john.doe",
-    "session_id": "sess_abc123"
-  }
-}
+```bash
+curl -X POST http://localhost:3000/api/v1/logs \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: user_123" \
+  -H "X-Tenant-Id: tenant_001" \
+  -d '{
+    "type": "audit",
+    "event_id": "evt_001",
+    "source_service": "auth-service",
+    "status": "success",
+    "action": "user_login",
+    "payload": {
+      "username": "john.doe",
+      "session_id": "sess_abc123"
+    }
+  }'
 ```
+
+Note: The `actor_id` is automatically populated from the `X-User-Id` header, and `tenant_id` from `X-Tenant-Id`.
 
 **Transaction Log Example:**
 ```json
@@ -106,6 +119,8 @@ POST /api/v1/logs
 ```bash
 GET /api/v1/logs?source_service=auth-service&status=success&limit=20
 ```
+
+Note: Results are automatically filtered by the tenant ID from the `X-Tenant-Id` header.
 
 #### 3. Advanced Search
 ```bash
@@ -164,7 +179,8 @@ QUEUE_MAX_RETRIES=3
 - `event_id`: Unique event identifier
 - `timestamp`: Event occurrence time
 - `source_service`: Service that generated the event
-- `actor_id`: User/system that initiated the action
+- `tenant_id`: Tenant identifier (auto-populated from X-Tenant-Id header)
+- `actor_id`: User/system that initiated the action (auto-populated from X-User-Id header)
 - `correlation_id`: For tracing related events
 - `action`: Action performed (create, update, delete, etc.)
 - `status`: Event status (success, failure, partial)
@@ -193,14 +209,17 @@ QUEUE_MAX_RETRIES=3
 
 ```go
 // See examples/go-client/main.go for complete implementation
-client := NewAuditClient("http://localhost:3000")
+// User ID and Tenant ID come from your RBAC service
+userID := "user_123"
+tenantID := "tenant_001"
+client := NewAuditClient("http://localhost:3000", userID, tenantID)
 
 auditLog := AuditLogRequest{
     Type:          LogTypeAudit,
     SourceService: "auth-service-go",
     Status:        LogStatusSuccess,
     Action:        "user_login",
-    ActorID:       "user123",
+    // ActorID is automatically set from X-User-Id header
     Payload: map[string]interface{}{
         "username": "john.doe",
     },
@@ -284,11 +303,13 @@ All errors follow a consistent response format:
 
 ## 🔒 Security Considerations
 
-1. **Input Validation**: Strict DTO validation using class-validator
-2. **Rate Limiting**: Configurable rate limits per endpoint
-3. **CORS**: Configurable CORS policies
-4. **Authentication**: Support for Bearer tokens and API keys
-5. **Data Sanitization**: Prevention of NoSQL injection attacks
+1. **Multi-tenancy**: Automatic tenant isolation via RBAC headers
+2. **Input Validation**: Strict DTO validation using class-validator
+3. **Rate Limiting**: Configurable rate limits per endpoint
+4. **CORS**: Configurable CORS policies
+5. **Authentication**: Handled by upstream RBAC service
+6. **Data Sanitization**: Prevention of NoSQL injection attacks
+7. **Tenant Isolation**: All queries automatically scoped to tenant from X-Tenant-Id header
 
 ## 📝 API Contract (OpenAPI)
 

@@ -10,6 +10,7 @@ import {
   ValidationPipe,
   UseInterceptors,
   ClassSerializerInterceptor,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -23,10 +24,22 @@ import {
 import { AuditService } from './audit.service';
 import { CreateAuditLogDto, CreateTransactionLogDto, LogType } from '../dto/create-log.dto';
 import { SearchLogsDto, AdvancedSearchDto } from '../dto/search-log.dto';
+import { ReqContext, RequestContext, UserId, TenantId } from '../common/decorators/request-context.decorator';
+import { Request } from 'express';
 
 @ApiTags('Audit Logs')
 @Controller('v1/logs')
 @UseInterceptors(ClassSerializerInterceptor)
+@ApiHeader({
+  name: 'x-user-id',
+  description: 'User ID from RBAC service',
+  required: false,
+})
+@ApiHeader({
+  name: 'x-tenant-id',
+  description: 'Tenant ID from RBAC service',
+  required: false,
+})
 @ApiHeader({
   name: 'x-correlation-id',
   description: 'Correlation ID for request tracing',
@@ -64,8 +77,19 @@ export class AuditController {
   })
   async ingestLog(
     @Body(ValidationPipe) logData: CreateAuditLogDto | CreateTransactionLogDto,
+    @ReqContext() context: RequestContext,
   ) {
-    return this.auditService.ingestLog(logData);
+    // Enrich log data with context from RBAC headers
+    const enrichedLogData = {
+      ...logData,
+      tenant_id: context.tenantId,
+      actor_id: logData['actor_id'] || context.userId,
+      correlation_id: logData.correlation_id || context.correlationId,
+      ip_address: logData['ip_address'] || context.ipAddress,
+      user_agent: logData['user_agent'] || context.userAgent,
+    };
+    
+    return this.auditService.ingestLog(enrichedLogData);
   }
 
   @Get()
@@ -96,8 +120,14 @@ export class AuditController {
   })
   async searchLogs(
     @Query(ValidationPipe) searchDto: SearchLogsDto,
+    @TenantId() tenantId: string,
   ) {
-    return this.auditService.searchLogs(searchDto);
+    // Automatically filter by tenant ID from RBAC headers
+    const tenantScopedSearch = {
+      ...searchDto,
+      tenant_id: tenantId,
+    };
+    return this.auditService.searchLogs(tenantScopedSearch);
   }
 
   @Post('search')
@@ -111,8 +141,17 @@ export class AuditController {
   })
   async advancedSearch(
     @Body(ValidationPipe) searchDto: AdvancedSearchDto,
+    @TenantId() tenantId: string,
   ) {
-    return this.auditService.advancedSearch(searchDto);
+    // Ensure tenant isolation in advanced search
+    const tenantScopedSearch = {
+      ...searchDto,
+      filters: [
+        ...(searchDto.filters || []),
+        { field: 'tenant_id', operator: 'eq' as const, value: tenantId },
+      ],
+    };
+    return this.auditService.advancedSearch(tenantScopedSearch);
   }
 
   @Get('correlation/:correlationId')
@@ -131,8 +170,9 @@ export class AuditController {
   })
   async getLogsByCorrelationId(
     @Param('correlationId') correlationId: string,
+    @TenantId() tenantId: string,
   ) {
-    return this.auditService.getLogsByCorrelationId(correlationId);
+    return this.auditService.getLogsByCorrelationId(correlationId, tenantId);
   }
 
   @Get('stats/queue')
@@ -189,7 +229,8 @@ export class AuditController {
   async getLogById(
     @Param('id') id: string,
     @Query('type') type?: LogType,
+    @TenantId() tenantId: string,
   ) {
-    return this.auditService.getLogById(id, type);
+    return this.auditService.getLogById(id, type, tenantId);
   }
 }
